@@ -1,0 +1,16 @@
+# Ignore Data
+data_raw/
+data_processed/
+*.csv
+*.xlsx
+*.parquet
+
+# Ignore System Files
+.DS_Store
+.ipynb_checkpoints
+__pycache__/
+
+# Ignore Virtual Environments
+.venv/
+venv/
+env/
