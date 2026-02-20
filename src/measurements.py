@@ -26,6 +26,16 @@ class Measurement:
 
     def plot(self, ax=None):
         raise NotImplementedError("Subclasses must implement plot")
+    
+    def get_extent(self):
+        """Returns the bounding box of the scan in stage coordinates."""
+        half_size = self.meta.scan_size / 2
+        return [
+            self.meta.x - half_size, # Left
+            self.meta.x + half_size, # Right
+            self.meta.y - half_size, # Bottom
+            self.meta.y + half_size  # Top
+        ]
 
 # ==========================================
 # SPECIFIC MEASUREMENT TYPES
@@ -71,6 +81,13 @@ class g2Measurement(Measurement):
         return ax
 
 class SpectrumMeasurement(Measurement):
+    def crop(self, x_min, x_max):
+        """Filters the dataframe to only include wavelengths between x_min and x_max."""
+        if self.data is not None:
+            # Column 0 is Wavelength
+            mask = (self.data.iloc[:, 0] >= x_min) & (self.data.iloc[:, 0] <= x_max)
+            self.data = self.data[mask]
+
     def plot(self, ax=None):
         if self.data is None: self.load()
         if ax is None: _, ax = plt.subplots()
@@ -78,7 +95,7 @@ class SpectrumMeasurement(Measurement):
         x = self.data.iloc[:, 0]
         y = self.data.iloc[:, 1]
 
-        ax.plot(x, y, color='purple')
+        ax.plot(x, y, color='purple', linewidth=1.5)
         ax.set_xlabel("Wavelength (nm)")
         ax.set_ylabel("Intensity (a.u.)")
         ax.set_title(f"Spectrum (Power: {self.meta.power} uW)")
