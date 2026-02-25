@@ -113,3 +113,44 @@ class PLMapMeasurement(Measurement):
         ax.set_xlabel("X (pixels)")
         ax.set_ylabel("Y (pixels)")
         return ax
+
+class StabilityMeasurement(Measurement):
+    def plot(self, ax=None):
+        if self.data is None: self.load()
+        if ax is None: _, ax = plt.subplots()
+
+        # Column 0 is Time, Column 1 is Channel 1
+        time = self.data.iloc[:, 0]
+        ch1 = self.data.iloc[:, 1]
+        
+        ax.plot(time, ch1, color='blue', label='Ch1')
+        
+        # Check if there is a second channel (Column 2)
+        if self.data.shape[1] > 2:
+            ch2 = self.data.iloc[:, 2]
+            ax.plot(time, ch2, color='red', label='Ch2')
+            ax.legend()
+
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Counts")
+        ax.set_title(f"Stability (Power: {self.meta.power} uW)")
+        ax.grid(True)
+        return ax
+
+class SaturationMeasurement(Measurement):
+    def plot(self, ax=None):
+        if self.data is None: self.load()
+        if ax is None: _, ax = plt.subplots()
+
+        # Column 0 is Voltage/Power
+        power = self.data.iloc[:, 0]
+        
+        # Fallback logic: Use column index 2 if it's a 3-column file, otherwise index 1
+        counts = self.data.iloc[:, 2] if self.data.shape[1] > 2 else self.data.iloc[:, 1]
+
+        ax.plot(power, counts, 'bo', markersize=6)
+        ax.set_xlabel("Power")
+        ax.set_ylabel("Counts")
+        ax.set_title("Saturation")
+        ax.grid(True)
+        return ax

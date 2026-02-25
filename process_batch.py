@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 import glob
+import os
+import tkinter as tk
+from tkinter import filedialog
 from tqdm import tqdm # Progress bar
 from src.parsers import FilenameParser
 from src.measurements import LifetimeMeasurement, g2Measurement
@@ -11,12 +14,29 @@ import warnings
 warnings.filterwarnings('ignore')
 
 def run_pipeline():
-    # 1. Setup
-    files = glob.glob("data_raw/*.csv")
+    # 1. Setup - Prompt for folder
+    root = tk.Tk()
+    root.withdraw() # Hide the small default tkinter window
+    
+    print("Waiting for folder selection...")
+    folder_selected = filedialog.askdirectory(title="Select Folder Containing Raw CSV Data")
+    
+    if not folder_selected:
+        print("❌ No folder selected. Exiting pipeline.")
+        return
+
+    # Create search path based on user selection
+    search_path = os.path.join(folder_selected, "*.csv")
+    files = glob.glob(search_path)
+    
+    if not files:
+        print(f"❌ No CSV files found in {folder_selected}. Exiting pipeline.")
+        return
+        
     results_lifetime = []
     results_g2 = []
     
-    print(f"🚀 Starting Batch Process on {len(files)} files...")
+    print(f"🚀 Starting Batch Process on {len(files)} files from {folder_selected}...")
     
     # 2. The Main Loop
     for f in tqdm(files):
@@ -68,6 +88,9 @@ def run_pipeline():
             results_g2.append(record)
 
     # 3. Save Summary
+    # Ensure the output directory exists so to_csv doesn't throw a FileNotFoundError
+    os.makedirs("data_processed", exist_ok=True)
+    
     if results_lifetime:
         df_life = pd.DataFrame(results_lifetime)
         df_life.to_csv("data_processed/summary_lifetime.csv", index=False)

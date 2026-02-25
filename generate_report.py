@@ -20,7 +20,7 @@ def select_folder():
     root.destroy()
     return selected_path
 
-def generate_pdf_report(output_filename="data_processed/Emitter_Report_Peigang.pdf"):
+def generate_pdf_report(output_filename="data_processed/Emitter_Report_Pranshu.pdf"):
     # 1. User Inputs: Folder and Crop Range
     data_folder = select_folder()
     if not data_folder:
