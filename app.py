@@ -8,7 +8,7 @@ import os
 
 # Import your custom modules
 from src.parsers import FilenameParser
-from src.measurements import LifetimeMeasurement, g2Measurement, SpectrumMeasurement, PLMapMeasurement
+from src.measurements import LifetimeMeasurement, g2Measurement, SpectrumMeasurement, PLMapMeasurement, StabilityMeasurement, SaturationMeasurement
 
 # ==========================================
 # 1. SETUP: Scan Directory and Build Map Database
@@ -37,7 +37,8 @@ df_summary = pd.DataFrame(records) if records else pd.DataFrame(columns=['Filena
 # 2. STITCHING ENGINE: Build Master PL Scan
 # ==========================================
 pl_files = df_summary[df_summary['Type'] == 'PL']
-point_files = df_summary[df_summary['Type'].isin(['Spectrum', 'Lifetime', 'g2'])]
+# ADDED 'Stability' and 'Saturation' to the points list
+point_files = df_summary[df_summary['Type'].isin(['Spectrum', 'Lifetime', 'g2', 'Stability', 'Saturation'])]
 
 master_x, master_y, master_z = None, None, None
 
@@ -128,7 +129,7 @@ if not df_map.empty:
 
 fig_map.update_layout(
     xaxis_title="X position (µm)", yaxis_title="Y position (µm)",
-    clickmode='event+select', height=750, template="plotly_white", # Slightly taller to match right panel
+    clickmode='event+select', height=750, template="plotly_white",
     yaxis=dict(scaleanchor="x", scaleratio=1),
     margin=dict(t=30, b=30, l=30, r=30)
 )
@@ -137,20 +138,22 @@ app.layout = html.Div([
     html.H1("Interactive Data Explorer", style={'textAlign': 'center', 'fontFamily': 'Arial'}),
     
     html.Div([
-        # LEFT PANEL: Spatial Map (Headers removed)
+        # LEFT PANEL: Spatial Map
         html.Div([
             dcc.Graph(id='spatial-map', figure=fig_map)
         ], style={'width': '40%', 'display': 'inline-block', 'verticalAlign': 'top', 'padding': '10px'}),
 
         # RIGHT PANEL: Dynamic Plots & Controls
         html.Div([
-            # Added a checklist to toggle which plots are visible
+            # Added Stability and Saturation to the checklist
             dcc.Checklist(
                 id='plot-selector',
                 options=[
                     {'label': ' Spectrum \u00A0\u00A0', 'value': 'Spectrum'},
                     {'label': ' Lifetime \u00A0\u00A0', 'value': 'Lifetime'},
-                    {'label': ' g(2) Correlation', 'value': 'g2'}
+                    {'label': ' g(2) \u00A0\u00A0', 'value': 'g2'},
+                    {'label': ' Stability \u00A0\u00A0', 'value': 'Stability'},
+                    {'label': ' Saturation', 'value': 'Saturation'}
                 ],
                 value=['Spectrum', 'g2'], # Defaults to showing just Spectrum and g2
                 inline=True,
@@ -158,7 +161,9 @@ app.layout = html.Div([
             ),
             dcc.Graph(id='spectrum-plot'),
             dcc.Graph(id='lifetime-plot'),
-            dcc.Graph(id='g2-plot')
+            dcc.Graph(id='g2-plot'),
+            dcc.Graph(id='stability-plot'),
+            dcc.Graph(id='saturation-plot')
         ], style={'width': '58%', 'display': 'inline-block', 'verticalAlign': 'top', 'padding': '10px'})
         
     ], style={'display': 'flex', 'justifyContent': 'space-between'})
@@ -201,27 +206,35 @@ def format_plot_labels(metas, base_title, loc_x, loc_y):
 @app.callback(
     [Output('spectrum-plot', 'figure'), Output('spectrum-plot', 'style'),
      Output('lifetime-plot', 'figure'), Output('lifetime-plot', 'style'),
-     Output('g2-plot', 'figure'), Output('g2-plot', 'style')],
+     Output('g2-plot', 'figure'), Output('g2-plot', 'style'),
+     Output('stability-plot', 'figure'), Output('stability-plot', 'style'),
+     Output('saturation-plot', 'figure'), Output('saturation-plot', 'style')],
     [Input('spatial-map', 'clickData'), Input('plot-selector', 'value')]
 )
 def update_plots(clickData, selected_plots):
     
-    # Calculate dynamic heights to fill the vertical space optimally
+    # Calculate dynamic heights to fill the vertical space. 
+    # Maxes out at a total height of 900px, or ensures each plot gets at least 220px if all 5 are selected.
     num_visible = len(selected_plots) if selected_plots else 1
-    dynamic_height = f"{700 // num_visible}px"
+    total_height = max(750, num_visible * 220)
+    dynamic_height = f"{total_height // num_visible}px"
     
     # Set display styles based on checklist
     style_spec = {'height': dynamic_height, 'display': 'block' if 'Spectrum' in selected_plots else 'none'}
     style_life = {'height': dynamic_height, 'display': 'block' if 'Lifetime' in selected_plots else 'none'}
     style_g2 = {'height': dynamic_height, 'display': 'block' if 'g2' in selected_plots else 'none'}
+    style_stab = {'height': dynamic_height, 'display': 'block' if 'Stability' in selected_plots else 'none'}
+    style_sat = {'height': dynamic_height, 'display': 'block' if 'Saturation' in selected_plots else 'none'}
 
     # Base Figures
     fig_spec = go.Figure().update_layout(title="Spectrum", xaxis_title="Wavelength (nm)", yaxis_title="Intensity (a.u.)", template="plotly_white", margin=dict(t=50, b=30))
     fig_life = go.Figure().update_layout(title="Lifetime Decay", xaxis_title="Time (ns)", yaxis_title="Counts", yaxis_type="log", template="plotly_white", margin=dict(t=50, b=30))
     fig_g2 = go.Figure().update_layout(title="g(2) Correlation", xaxis_title="Delay (ns)", yaxis_title="Coincidences", template="plotly_white", margin=dict(t=50, b=30))
+    fig_stab = go.Figure().update_layout(title="Stability", xaxis_title="Time (s)", yaxis_title="Counts", template="plotly_white", margin=dict(t=50, b=30))
+    fig_sat = go.Figure().update_layout(title="Saturation", xaxis_title="Voltage / Power", yaxis_title="Counts", template="plotly_white", margin=dict(t=50, b=30))
 
     if clickData is None or df_summary.empty: 
-        return fig_spec, style_spec, fig_life, style_life, fig_g2, style_g2
+        return fig_spec, style_spec, fig_life, style_life, fig_g2, style_g2, fig_stab, style_stab, fig_sat, style_sat
 
     print("\n" + "="*40)
     print("🔘 CLICK EVENT DETECTED")
@@ -229,13 +242,11 @@ def update_plots(clickData, selected_plots):
     try:
         point = clickData['points'][0]
         
-        # Scenario A: You perfectly clicked the scatter point
         if 'customdata' in point:
             loc_x = float(point['customdata'][0])
             loc_y = float(point['customdata'][1])
             print(f"📍 Direct hit on scatter point: X={loc_x}, Y={loc_y}")
             
-        # Scenario B: You missed the scatter point and clicked the heatmap layer
         else:
             click_x = float(point['x'])
             click_y = float(point['y'])
@@ -250,11 +261,11 @@ def update_plots(clickData, selected_plots):
                 print(f"🧲 Snapped to nearest measurement at X={loc_x}, Y={loc_y} (Distance: {distances[min_dist_idx]:.2f}µm)")
             else:
                 print("❌ Too far from any measurement. Aborting.")
-                return fig_spec, style_spec, fig_life, style_life, fig_g2, style_g2
+                return fig_spec, style_spec, fig_life, style_life, fig_g2, style_g2, fig_stab, style_stab, fig_sat, style_sat
 
     except Exception as e:
         print(f"🚨 Unexpected click error: {e}")
-        return fig_spec, style_spec, fig_life, style_life, fig_g2, style_g2
+        return fig_spec, style_spec, fig_life, style_life, fig_g2, style_g2, fig_stab, style_stab, fig_sat, style_sat
 
     mask = np.isclose(df_summary['X'].astype(float), loc_x) & np.isclose(df_summary['Y'].astype(float), loc_y)
     local_files = df_summary[mask]
@@ -262,9 +273,13 @@ def update_plots(clickData, selected_plots):
     print(f"📂 Found {len(local_files)} files matching this location.")
 
     if local_files.empty:
-        return fig_spec, style_spec, fig_life, style_life, fig_g2, style_g2
+        return fig_spec, style_spec, fig_life, style_life, fig_g2, style_g2, fig_stab, style_stab, fig_sat, style_sat
 
-    # Process Spectra (Only process if selected to save computation)
+    # ==========================
+    # DATA PROCESSING BLOCKS
+    # ==========================
+    
+    # 1. Process Spectra
     if 'Spectrum' in selected_plots:
         spec_metas = local_files[local_files['Type'] == 'Spectrum']['Metadata'].tolist()
         if spec_metas:
@@ -282,7 +297,7 @@ def update_plots(clickData, selected_plots):
                 except Exception as e:
                     print(f"     🚨 ERROR: {e}")
 
-    # Process Lifetime
+    # 2. Process Lifetime
     if 'Lifetime' in selected_plots:
         life_metas = local_files[local_files['Type'] == 'Lifetime']['Metadata'].tolist()
         if life_metas:
@@ -303,7 +318,7 @@ def update_plots(clickData, selected_plots):
                 except Exception as e:
                     print(f"     🚨 ERROR: {e}")
 
-    # Process g2
+    # 3. Process g2
     if 'g2' in selected_plots:
         g2_metas = local_files[local_files['Type'] == 'g2']['Metadata'].tolist()
         if g2_metas:
@@ -324,7 +339,82 @@ def update_plots(clickData, selected_plots):
                 except Exception as e:
                     print(f"     🚨 ERROR: {e}")
 
-    return fig_spec, style_spec, fig_life, style_life, fig_g2, style_g2
+  # 4. Process Stability
+    if 'Stability' in selected_plots:
+        stab_metas = local_files[local_files['Type'] == 'Stability']['Metadata'].tolist()
+        if stab_metas:
+            title, var_attrs, attr_map = format_plot_labels(stab_metas, "Stability", loc_x, loc_y)
+            # Add secondary Y-axis config to the Plotly layout
+            fig_stab.update_layout(
+                title=title,
+                yaxis=dict(title="Counts", titlefont=dict(color="blue"), tickfont=dict(color="blue")),
+                yaxis2=dict(title="Laser Power (μW)", titlefont=dict(color="orange"), tickfont=dict(color="orange"), anchor="x", overlaying="y", side="right")
+            )
+            
+            for meta in stab_metas:
+                print(f"  -> Processing Stability: {meta.filepath}")
+                try:
+                    meas = StabilityMeasurement(meta)
+                    meas.load()
+                    if meas.data is not None:
+                        power = pd.to_numeric(meas.data.iloc[:, 0], errors='coerce')
+                        counts = pd.to_numeric(meas.data.iloc[:, 1], errors='coerce')
+                        
+                        # Legacy summing
+                        if meas.data.shape[1] > 2:
+                            ch2 = pd.to_numeric(meas.data.iloc[:, 2], errors='coerce')
+                            counts = counts.fillna(0) + ch2.fillna(0)
+                        
+                        original_len = len(counts)
+                        
+                        # 100ms fallback
+                        if pd.isna(meta.integration_time):
+                            dt = 0.1 
+                        else:
+                            dt = meta.integration_time / original_len
+                            
+                        if original_len > 10:
+                            counts = counts.iloc[5:].reset_index(drop=True)
+                            power = power.iloc[5:].reset_index(drop=True)
+                                
+                        time = np.arange(len(counts)) * dt
+                        
+                        trace_name = ", ".join([f"{attr_map[a]}: {getattr(meta, a)}" for a in var_attrs])
+                        base_name = trace_name or "Stability"
+                        
+                        # Add Counts trace
+                        fig_stab.add_trace(go.Scatter(x=time, y=counts, mode='lines', name=f"{base_name} (Counts)", yaxis="y1", line=dict(color='blue')))
+                        # Add Power trace on secondary axis
+                        fig_stab.add_trace(go.Scatter(x=time, y=power, mode='lines', name=f"{base_name} (Power)", yaxis="y2", line=dict(color='orange', dash='dot')))
+                except Exception as e:
+                    print(f"     🚨 ERROR: {e}")
+
+    # 5. Process Saturation
+    if 'Saturation' in selected_plots:
+        sat_metas = local_files[local_files['Type'] == 'Saturation']['Metadata'].tolist()
+        if sat_metas:
+            title, var_attrs, attr_map = format_plot_labels(sat_metas, "Saturation", loc_x, loc_y)
+            fig_sat.update_layout(title=title)
+            
+            for meta in sat_metas:
+                print(f"  -> Processing Saturation: {meta.filepath}")
+                try:
+                    meas = SaturationMeasurement(meta)
+                    meas.load()
+                    if meas.data is not None:
+                        # Maps directly to MATLAB's read_saturation_data (Col 1: Voltage, Col 3: Counts)
+                        voltage = meas.data.iloc[:, 0]
+                        # Use column 2 (0-indexed for MATLAB col 3), fallback to column 1 if it's a 2-col file
+                        counts = meas.data.iloc[:, 2] if meas.data.shape[1] > 2 else meas.data.iloc[:, 1]
+                        
+                        trace_name = ", ".join([f"{attr_map[a]}: {getattr(meta, a)}" for a in var_attrs])
+                        # Saturation data is usually plotted as discrete dots
+                        fig_sat.add_trace(go.Scatter(x=voltage, y=counts, mode='markers', marker=dict(size=8), name=trace_name or "Saturation"))
+                except Exception as e:
+                    print(f"     🚨 ERROR: {e}")
+
+    return fig_spec, style_spec, fig_life, style_life, fig_g2, style_g2, fig_stab, style_stab, fig_sat, style_sat
 
 if __name__ == '__main__':
     app.run(debug=True, port=8050)
+    

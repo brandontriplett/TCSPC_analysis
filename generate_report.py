@@ -9,7 +9,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 # Importing the classes we built in previous steps
 from src.parsers import FilenameParser
-from src.measurements import PLMapMeasurement, g2Measurement, SpectrumMeasurement
+from src.measurements import PLMapMeasurement, g2Measurement, SpectrumMeasurement, StabilityMeasurement, SaturationMeasurement, LifetimeMeasurement
 
 def select_folder():
     """Opens a native Mac folder selection dialog."""
@@ -20,13 +20,14 @@ def select_folder():
     root.destroy()
     return selected_path
 
-def generate_pdf_report(output_filename="data_processed/Emitter_Report_Pranshu.pdf"):
+def generate_pdf_report(output_filename="data_processed/0225_autoscan.pdf"):
     # 1. User Inputs: Folder and Crop Range
     data_folder = select_folder()
     if not data_folder:
         print("❌ No folder selected. Exiting.")
         return
 
+    print("\n" + "="*40)
     crop_input = input("Enter wavelength crop range (min, max in nm) or Enter for full: ")
     wavelength_limits = None
     if crop_input.strip():
@@ -45,15 +46,15 @@ def generate_pdf_report(output_filename="data_processed/Emitter_Report_Pranshu.p
         print(f"❌ No valid TCSPC files found in {data_folder}")
         return
 
-    # 3. Identify Unique Emitters (By coordinate)
-    # Using Spectrum and g2 as the primary indicators of a point-of-interest
+    # 3. Identify Unique Emitters (Added Lifetime to the search)
     emitters = []
     for m in all_meta:
-        if m.type in ['Spectrum', 'g2']:
+        if m.type in ['Spectrum', 'g2', 'Stability', 'Saturation', 'Lifetime']:
             emitters.append((round(m.x, 1), round(m.y, 1)))
     
     unique_emitters = sorted(list(set(emitters)))
-    print(f"🚀 Processing {len(unique_emitters)} unique emitters...")
+    total_emitters = len(unique_emitters)
+    print(f"🚀 Processing {total_emitters} unique emitters...")
 
     # 4. Separate PL Scans for search logic
     pl_scans = [PLMapMeasurement(m) for m in all_meta if m.type == 'PL']
@@ -62,74 +63,119 @@ def generate_pdf_report(output_filename="data_processed/Emitter_Report_Pranshu.p
     os.makedirs(os.path.dirname(output_filename), exist_ok=True)
 
     with PdfPages(output_filename) as pdf:
-        for ex, ey in unique_emitters:
+        for idx, (ex, ey) in enumerate(unique_emitters):
+            print(f"   -> Rendering page {idx + 1}/{total_emitters} for Emitter at ({ex}, {ey})...")
+            
             # Match data for THIS specific emitter
             this_g2 = next((m for m in all_meta if m.type == 'g2' and round(m.x, 1) == ex and round(m.y, 1) == ey), None)
             this_spec = next((m for m in all_meta if m.type == 'Spectrum' and round(m.x, 1) == ex and round(m.y, 1) == ey), None)
+            this_life = next((m for m in all_meta if m.type == 'Lifetime' and round(m.x, 1) == ex and round(m.y, 1) == ey), None)
+            this_stab = next((m for m in all_meta if m.type == 'Stability' and round(m.x, 1) == ex and round(m.y, 1) == ey), None)
+            this_sat = next((m for m in all_meta if m.type == 'Saturation' and round(m.x, 1) == ex and round(m.y, 1) == ey), None)
             
-            # Find the best PL scan that contains this coordinate
+            # Find the best PL scan (most centered)
             match_pl = None
+            min_dist = float('inf')
+            
             for pl in pl_scans:
                 ext = pl.get_extent()
                 if ext[0] <= ex <= ext[1] and ext[2] <= ey <= ext[3]:
-                    match_pl = pl
-                    break
+                    dist = (ex - pl.meta.x)**2 + (ey - pl.meta.y)**2
+                    if dist < min_dist:
+                        min_dist = dist
+                        match_pl = pl
 
-            # --- PLOTTING ---
-            fig = plt.figure(figsize=(11, 8.5))
-            plt.suptitle(f"Emitter Profile: X={ex}, Y={ey}", fontsize=16, fontweight='bold')
+            # --- DYNAMIC LAYOUT LOGIC ---
+            active_plots = []
+            if match_pl: active_plots.append('PL')
+            if this_spec: active_plots.append('Spec')
+            if this_g2: active_plots.append('g2')
+            if this_life: active_plots.append('Life')
+            if this_stab: active_plots.append('Stab')
+            if this_sat: active_plots.append('Sat')
+            
+            num_plots = len(active_plots)
+            if num_plots == 0:
+                continue
 
-            # Subplot 1: PL Map Context
-            ax1 = fig.add_subplot(2, 2, 1)
-            if match_pl:
-                match_pl.load()
+            # Determine grid dimensions
+            if num_plots == 1: rows, cols = 1, 1
+            elif num_plots == 2: rows, cols = 1, 2
+            elif num_plots <= 4: rows, cols = 2, 2
+            else: rows, cols = 2, 3 # Maxes out perfectly at 6 plots!
+
+            # Set up the figure
+            fig = plt.figure(figsize=(15, 10))
+            
+            # Build the dynamic slide title
+            env_file = this_g2 or this_spec or this_life or this_stab or this_sat
+            power_val = f"{env_file.power} μW" if env_file and not pd.isna(env_file.power) else 'N/A'
+            filter_val = env_file.filter if env_file else 'N/A'
+            nd_val = env_file.nd if env_file and not pd.isna(env_file.nd) else 'N/A'
+            
+            suptitle_text = f"Emitter Profile: X={ex}, Y={ey} | Power: {power_val} | Filter: {filter_val} | ND: {nd_val}"
+            plt.suptitle(suptitle_text, fontsize=16, fontweight='bold')
+
+            current_idx = 1
+            
+            if 'PL' in active_plots:
+                ax = fig.add_subplot(rows, cols, current_idx)
+                if match_pl.data is None: 
+                    match_pl.load()
                 ext = match_pl.get_extent()
-                ax1.imshow(match_pl.data, extent=ext, cmap='inferno', origin='lower')
-                ax1.plot(ex, ey, 'w+', markersize=15, markeredgewidth=2) # Overlay crosshair
-                ax1.set_title("PL Map Location Overlay")
-                ax1.set_xlabel("X (μm)")
-                ax1.set_ylabel("Y (μm)")
-            else:
-                ax1.text(0.5, 0.5, "No matching PL scan found", ha='center', va='center')
+                ax.imshow(match_pl.data, extent=ext, cmap='inferno', origin='lower')
+                ax.plot(ex, ey, 'w+', markersize=15, markeredgewidth=2)
+                ax.set_title("PL Map Location Overlay")
+                ax.set_xlabel("X (μm)")
+                ax.set_ylabel("Y (μm)")
+                current_idx += 1
 
-            # Subplot 2: g2
-            ax2 = fig.add_subplot(2, 2, 2)
-            if this_g2:
-                g2_obj = g2Measurement(this_g2)
-                g2_obj.plot(ax=ax2)
-            else:
-                ax2.text(0.5, 0.5, "g2 Data Missing", ha='center', va='center')
-
-            # Subplot 3: Spectrum
-            ax3 = fig.add_subplot(2, 2, 3)
-            if this_spec:
+            if 'Spec' in active_plots:
+                ax = fig.add_subplot(rows, cols, current_idx)
                 spec_obj = SpectrumMeasurement(this_spec)
-                spec_obj.load()
                 if wavelength_limits:
+                    spec_obj.load() 
                     spec_obj.crop(wavelength_limits[0], wavelength_limits[1])
-                spec_obj.plot(ax=ax3)
-            else:
-                ax3.text(0.5, 0.5, "Spectrum Data Missing", ha='center', va='center')
+                spec_obj.plot(ax=ax)
+                
+                # Append integration time to title
+                int_time = this_spec.integration_time if not pd.isna(this_spec.integration_time) else "N/A"
+                ax.set_title(f"Spectrum (Int: {int_time}s)")
+                current_idx += 1
 
-            # Subplot 4: Summary Table
-            ax4 = fig.add_subplot(2, 2, 4)
-            ax4.axis('off')
-            
-            summary_text = (
-                f"COORDINATES: ({ex}, {ey})\n\n"
-                f"--- Environment (g2 file) ---\n"
-                f"Power:  {this_g2.power if this_g2 else 'N/A'} μW\n"
-                f"Filter: {this_g2.filter if this_g2 else 'N/A'}\n"
-                f"ND:     {this_g2.nd if this_g2 else 'N/A'}\n\n"
-                f"--- Source Files ---\n"
-                f"g2:   {os.path.basename(this_g2.filepath) if this_g2 else 'None'}\n"
-                f"Spec: {os.path.basename(this_spec.filepath) if this_spec else 'None'}"
-            )
-            
-            ax4.text(0.05, 0.85, summary_text, fontsize=10, verticalalignment='top', 
-                     fontfamily='monospace', linespacing=1.6,
-                     bbox=dict(boxstyle='round,pad=1', facecolor='azure', edgecolor='steelblue', alpha=0.3))
+            if 'g2' in active_plots:
+                ax = fig.add_subplot(rows, cols, current_idx)
+                g2_obj = g2Measurement(this_g2)
+                g2_obj.plot(ax=ax)
+                
+                # Append integration time to title
+                int_time = this_g2.integration_time if not pd.isna(this_g2.integration_time) else "N/A"
+                ax.set_title(f"g(2) Correlation (Int: {int_time}s)")
+                current_idx += 1
 
+            if 'Life' in active_plots:
+                ax = fig.add_subplot(rows, cols, current_idx)
+                life_obj = LifetimeMeasurement(this_life)
+                life_obj.plot(ax=ax)
+                
+                # Append integration time to title
+                int_time = this_life.integration_time if not pd.isna(this_life.integration_time) else "N/A"
+                ax.set_title(f"Lifetime Decay (Int: {int_time}s)")
+                current_idx += 1
+
+            if 'Stab' in active_plots:
+                ax = fig.add_subplot(rows, cols, current_idx)
+                stab_obj = StabilityMeasurement(this_stab)
+                stab_obj.plot(ax=ax)
+                current_idx += 1
+
+            if 'Sat' in active_plots:
+                ax = fig.add_subplot(rows, cols, current_idx)
+                sat_obj = SaturationMeasurement(this_sat)
+                sat_obj.plot(ax=ax)
+                current_idx += 1
+
+            # Adjust layout and save the page
             plt.tight_layout(rect=[0, 0.03, 1, 0.95])
             pdf.savefig(fig)
             plt.close(fig)

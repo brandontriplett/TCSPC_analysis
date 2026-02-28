@@ -48,7 +48,7 @@ class FilenameParser:
 
         'Stability': re.compile(
             r"^Stability_X(?P<x>[\d.]*)_Y(?P<y>[\d.]*)_ND(?P<nd>[\d.]*)_"
-            r"Pow(?P<power>[\d.]*)_Filter(?P<filter>[^_]+)"
+            r"Pow(?P<power>[\d.]*)_Filter(?P<filter>[^_]+)(?:_Int(?P<int>[\d.]*))?"
         ),
 
         'Saturation': re.compile(
@@ -77,17 +77,17 @@ class FilenameParser:
             return MeasurementMetadata(
                 type=meas_type,
                 filepath=str(path_obj),
-                x=float(raw_dict.get('x', 0)),
-                y=float(raw_dict.get('y', 0)),
-                power=float(raw_dict.get('power', float('nan'))),
-                nd=float(raw_dict.get('nd', float('nan'))),
-                filter=raw_dict.get('filter', 'None'),
-                integration_time=float(raw_dict.get('int', float('nan'))),
-                tac_range=float(raw_dict.get('tac', float('nan'))),
-                gain=float(raw_dict.get('gain', float('nan'))),
-                bin_width=float(raw_dict.get('bin', float('nan'))),
-                scan_size=float(raw_dict.get('size', float('nan'))),
-                mesh_step=float(raw_dict.get('mesh', float('nan')))
+                x=float(raw_dict.get('x') or 0.0),
+                y=float(raw_dict.get('y') or 0.0),
+                power=float(raw_dict.get('power') or float('nan')),
+                nd=float(raw_dict.get('nd') or float('nan')),
+                filter=raw_dict.get('filter') or 'None',
+                integration_time=float(raw_dict.get('int') or float('nan')),
+                tac_range=float(raw_dict.get('tac') or float('nan')),
+                gain=float(raw_dict.get('gain') or float('nan')),
+                bin_width=float(raw_dict.get('bin') or float('nan')),
+                scan_size=float(raw_dict.get('size') or float('nan')),
+                mesh_step=float(raw_dict.get('mesh') or float('nan'))
             )
         except ValueError:
             return None

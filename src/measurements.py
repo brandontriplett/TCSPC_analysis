@@ -119,22 +119,52 @@ class StabilityMeasurement(Measurement):
         if self.data is None: self.load()
         if ax is None: _, ax = plt.subplots()
 
-        # Column 0 is Time, Column 1 is Channel 1
-        time = self.data.iloc[:, 0]
-        ch1 = self.data.iloc[:, 1]
+        # Extract data safely (forcing to float to ignore any string headers)
+        # 1st column (index 0): Laser Power
+        # 2nd column (index 1): Counts
+        power = pd.to_numeric(self.data.iloc[:, 0], errors='coerce')
+        counts = pd.to_numeric(self.data.iloc[:, 1], errors='coerce')
         
-        ax.plot(time, ch1, color='blue', label='Ch1')
-        
-        # Check if there is a second channel (Column 2)
+        # Legacy check: if there is a 3rd column, sum it with the 2nd column
         if self.data.shape[1] > 2:
-            ch2 = self.data.iloc[:, 2]
-            ax.plot(time, ch2, color='red', label='Ch2')
-            ax.legend()
-
+            ch2 = pd.to_numeric(self.data.iloc[:, 2], errors='coerce')
+            counts = counts.fillna(0) + ch2.fillna(0)
+            
+        # 1. Determine time step (dt)
+        original_len = len(counts)
+        if pd.isna(self.meta.integration_time):
+            dt = 0.1  # Fallback: Assume 100ms (0.1s) per bin
+        else:
+            dt = self.meta.integration_time / original_len
+            
+        # 2. Throw away the first 5 data points (artifacts)
+        if original_len > 10:
+            counts = counts.iloc[5:].reset_index(drop=True)
+            power = power.iloc[5:].reset_index(drop=True)
+            
+        # 3. Build the new time array
+        time = np.arange(len(counts)) * dt
+        
+        # 4. Plotting
+        # Plot Counts on the primary (Left) Y-axis
+        l1 = ax.plot(time, counts, color='blue', label='Counts')
         ax.set_xlabel("Time (s)")
-        ax.set_ylabel("Counts")
-        ax.set_title(f"Stability (Power: {self.meta.power} uW)")
-        ax.grid(True)
+        ax.set_ylabel("Counts", color='blue')
+        ax.tick_params(axis='y', labelcolor='blue')
+        
+        # Plot Laser Power on a secondary (Right) Y-axis
+        ax2 = ax.twinx()
+        l2 = ax2.plot(time, power, color='red', linestyle='--', alpha=0.8, label='Laser Power')
+        ax2.set_ylabel("Laser Power (μW)", color='red')
+        ax2.tick_params(axis='y', labelcolor='red')
+
+        # Combine legends so they don't overlap
+        lines = l1 + l2
+        labels = [l.get_label() for l in lines]
+        ax.legend(lines, labels, loc='best')
+
+        ax.set_title(f"Stability (Avg Power: {self.meta.power} μW)")
+        ax.grid(True, alpha=0.3)
         return ax
 
 class SaturationMeasurement(Measurement):
