@@ -42,7 +42,7 @@ class Measurement:
 # ==========================================
 
 class LifetimeMeasurement(Measurement):
-    def plot(self, ax=None):
+    def plot(self, ax=None, label=None, configure_axes=True):
         if self.data is None: self.load()
         if ax is None: _, ax = plt.subplots()
 
@@ -54,14 +54,16 @@ class LifetimeMeasurement(Measurement):
         
         x = np.linspace(0, true_time_window, len(y))
 
-        ax.semilogy(x, y, label=f"Pos: {self.meta.x:.1f}, {self.meta.y:.1f}")
-        ax.set_xlabel("Time (ns)")
-        ax.set_ylabel("Counts (Log)")
-        ax.set_title(f"Lifetime (Range: {true_time_window:.1f} ns)")
+        trace_label = label or f"Pos: {self.meta.x:.1f}, {self.meta.y:.1f}"
+        ax.semilogy(x, y, label=trace_label, alpha=0.85)
+        if configure_axes:
+            ax.set_xlabel("Time (ns)")
+            ax.set_ylabel("Counts (Log)")
+            ax.set_title(f"Lifetime (Range: {true_time_window:.1f} ns)")
         return ax
 
 class g2Measurement(Measurement):
-    def plot(self, ax=None):
+    def plot(self, ax=None, label=None, configure_axes=True):
         if self.data is None: self.load()
         if ax is None: _, ax = plt.subplots()
 
@@ -74,10 +76,12 @@ class g2Measurement(Measurement):
         # Centered Delay Axis
         x = np.linspace(-true_time_window/2, true_time_window/2, len(y))
         
-        ax.plot(x, y, color='green', alpha=0.8)
-        ax.set_xlabel("Delay (ns)")
-        ax.set_ylabel("Coincidences")
-        ax.set_title(f"g2 (Range: {true_time_window:.1f} ns)")
+        trace_label = label or "g(2)"
+        ax.plot(x, y, label=trace_label, alpha=0.85)
+        if configure_axes:
+            ax.set_xlabel("Delay (ns)")
+            ax.set_ylabel("Coincidences")
+            ax.set_title(f"g2 (Range: {true_time_window:.1f} ns)")
         return ax
 
 class SpectrumMeasurement(Measurement):
@@ -88,17 +92,19 @@ class SpectrumMeasurement(Measurement):
             mask = (self.data.iloc[:, 0] >= x_min) & (self.data.iloc[:, 0] <= x_max)
             self.data = self.data[mask]
 
-    def plot(self, ax=None):
+    def plot(self, ax=None, label=None, configure_axes=True):
         if self.data is None: self.load()
         if ax is None: _, ax = plt.subplots()
 
         x = self.data.iloc[:, 0]
         y = self.data.iloc[:, 1]
 
-        ax.plot(x, y, color='purple', linewidth=1.5)
-        ax.set_xlabel("Wavelength (nm)")
-        ax.set_ylabel("Intensity (a.u.)")
-        ax.set_title(f"Spectrum (Power: {self.meta.power} uW)")
+        trace_label = label or f"Pow: {self.meta.power} uW"
+        ax.plot(x, y, label=trace_label, linewidth=1.5, alpha=0.85)
+        if configure_axes:
+            ax.set_xlabel("Wavelength (nm)")
+            ax.set_ylabel("Intensity (a.u.)")
+            ax.set_title(f"Spectrum (Power: {self.meta.power} uW)")
         return ax
 
 class PLMapMeasurement(Measurement):
@@ -115,7 +121,7 @@ class PLMapMeasurement(Measurement):
         return ax
 
 class StabilityMeasurement(Measurement):
-    def plot(self, ax=None):
+    def plot(self, ax=None, label=None, configure_axes=True, show_power=True):
         if self.data is None: self.load()
         if ax is None: _, ax = plt.subplots()
 
@@ -145,26 +151,26 @@ class StabilityMeasurement(Measurement):
         # 3. Build the new time array
         time = np.arange(len(counts)) * dt
         
-        # 4. Plotting
-        # Plot Counts on the primary (Left) Y-axis
-        l1 = ax.plot(time, counts, color='blue', label='Counts')
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel("Counts", color='blue')
-        ax.tick_params(axis='y', labelcolor='blue')
-        
-        # Plot Laser Power on a secondary (Right) Y-axis
-        ax2 = ax.twinx()
-        l2 = ax2.plot(time, power, color='red', linestyle='--', alpha=0.8, label='Laser Power')
-        ax2.set_ylabel("Laser Power (μW)", color='red')
-        ax2.tick_params(axis='y', labelcolor='red')
+        trace_label = label or "Counts"
+        l1 = ax.plot(time, counts, label=trace_label, alpha=0.85)
 
-        # Combine legends so they don't overlap
-        lines = l1 + l2
-        labels = [l.get_label() for l in lines]
-        ax.legend(lines, labels, loc='best')
+        if configure_axes:
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Counts")
+            ax.set_title(f"Stability (Avg Power: {self.meta.power} μW)")
 
-        ax.set_title(f"Stability (Avg Power: {self.meta.power} μW)")
-        ax.grid(True, alpha=0.3)
+        if show_power and configure_axes:
+            ax2 = ax.twinx()
+            l2 = ax2.plot(time, power, color='red', linestyle='--', alpha=0.8, label='Laser Power')
+            ax2.set_ylabel("Laser Power (μW)", color='red')
+            ax2.tick_params(axis='y', labelcolor='red')
+            lines = l1 + l2
+            ax.legend(lines, [line.get_label() for line in lines], loc='best')
+        elif configure_axes:
+            ax.legend(loc='best')
+
+        if configure_axes:
+            ax.grid(True, alpha=0.3)
         return ax
 
 class SaturationMeasurement(Measurement):

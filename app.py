@@ -416,5 +416,5 @@ def update_plots(clickData, selected_plots):
     return fig_spec, style_spec, fig_life, style_life, fig_g2, style_g2, fig_stab, style_stab, fig_sat, style_sat
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8050)
+    app.run(debug=True, port=8051)
     
