@@ -1,0 +1,22 @@
+[project]
+name = "tcspc-analysis"
+version = "0.1.0"
+description = "Parse, plot, and report TCSPC lab measurements"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "scipy",
+    "tqdm",
+    "dash",
+    "plotly",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["tcspc*"]

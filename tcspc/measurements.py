@@ -3,6 +3,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 from .parsers import MeasurementMetadata
 
+
+def histogram_axis(meta, n, centered=False):
+    """Time (ns) axis for lifetime/g2 histograms from TAC range and gain."""
+    tac = meta.tac_range if not pd.isna(meta.tac_range) else 50.0
+    gain = meta.gain if not pd.isna(meta.gain) else 1.0
+    window = tac / gain
+    if centered:
+        return np.linspace(-window / 2, window / 2, n)
+    return np.linspace(0, window, n)
+
+
 class Measurement:
     """Base class for all experiments."""
     def __init__(self, metadata: MeasurementMetadata):
@@ -24,7 +35,7 @@ class Measurement:
         except Exception as e:
             print(f"Error loading {self.meta.filepath}: {e}")
 
-    def plot(self, ax=None):
+    def plot(self, ax=None, label=None, configure_axes=True):
         raise NotImplementedError("Subclasses must implement plot")
     
     def get_extent(self):
@@ -46,20 +57,16 @@ class LifetimeMeasurement(Measurement):
         if self.data is None: self.load()
         if ax is None: _, ax = plt.subplots()
 
-        y = self.data.iloc[:, 0].values 
-        
-        tac = self.meta.tac_range if not pd.isna(self.meta.tac_range) else 50.0
-        gain = self.meta.gain if not pd.isna(self.meta.gain) else 1.0
-        true_time_window = tac / gain
-        
-        x = np.linspace(0, true_time_window, len(y))
+        y = self.data.iloc[:, 0].values
+        x = histogram_axis(self.meta, len(y), centered=False)
+        window = x[-1] - x[0] if len(x) > 1 else 0.0
 
         trace_label = label or f"Pos: {self.meta.x:.1f}, {self.meta.y:.1f}"
         ax.semilogy(x, y, label=trace_label, alpha=0.85)
         if configure_axes:
             ax.set_xlabel("Time (ns)")
             ax.set_ylabel("Counts (Log)")
-            ax.set_title(f"Lifetime (Range: {true_time_window:.1f} ns)")
+            ax.set_title(f"Lifetime (Range: {window:.1f} ns)")
         return ax
 
 class g2Measurement(Measurement):
@@ -68,20 +75,15 @@ class g2Measurement(Measurement):
         if ax is None: _, ax = plt.subplots()
 
         y = self.data.iloc[:, 0].values
-        
-        tac = self.meta.tac_range if not pd.isna(self.meta.tac_range) else 50.0
-        gain = self.meta.gain if not pd.isna(self.meta.gain) else 1.0
-        true_time_window = tac / gain
-        
-        # Centered Delay Axis
-        x = np.linspace(-true_time_window/2, true_time_window/2, len(y))
-        
+        x = histogram_axis(self.meta, len(y), centered=True)
+        window = (x[-1] - x[0]) if len(x) > 1 else 0.0
+
         trace_label = label or "g(2)"
         ax.plot(x, y, label=trace_label, alpha=0.85)
         if configure_axes:
             ax.set_xlabel("Delay (ns)")
             ax.set_ylabel("Coincidences")
-            ax.set_title(f"g2 (Range: {true_time_window:.1f} ns)")
+            ax.set_title(f"g2 (Range: {window:.1f} ns)")
         return ax
 
 class SpectrumMeasurement(Measurement):
@@ -108,49 +110,51 @@ class SpectrumMeasurement(Measurement):
         return ax
 
 class PLMapMeasurement(Measurement):
-    def plot(self, ax=None):
+    def plot(self, ax=None, label=None, configure_axes=True):
         if self.data is None: self.load()
         if ax is None: _, ax = plt.subplots()
 
-        im = ax.imshow(self.data, cmap='inferno', origin='lower')
-        plt.colorbar(im, ax=ax, label="Intensity")
-        
-        ax.set_title(f"PL Map (Size: {self.meta.scan_size}um)")
-        ax.set_xlabel("X (pixels)")
-        ax.set_ylabel("Y (pixels)")
+        extent = None
+        if self.meta.scan_size is not None and not pd.isna(self.meta.scan_size):
+            extent = self.get_extent()
+
+        im = ax.imshow(self.data, cmap='inferno', origin='lower', extent=extent)
+        if configure_axes:
+            plt.colorbar(im, ax=ax, label="Intensity")
+            ax.set_title(f"PL Map (Size: {self.meta.scan_size}um)")
+            if extent is not None:
+                ax.set_xlabel("X (μm)")
+                ax.set_ylabel("Y (μm)")
+            else:
+                ax.set_xlabel("X (pixels)")
+                ax.set_ylabel("Y (pixels)")
         return ax
 
 class StabilityMeasurement(Measurement):
-    def plot(self, ax=None, label=None, configure_axes=True, show_power=True):
-        if self.data is None: self.load()
-        if ax is None: _, ax = plt.subplots()
-
-        # Extract data safely (forcing to float to ignore any string headers)
-        # 1st column (index 0): Laser Power
-        # 2nd column (index 1): Counts
+    def series(self):
+        """Return ``(time, counts, power)`` after the same cleaning as ``plot``."""
+        if self.data is None:
+            self.load()
         power = pd.to_numeric(self.data.iloc[:, 0], errors='coerce')
         counts = pd.to_numeric(self.data.iloc[:, 1], errors='coerce')
-        
-        # Legacy check: if there is a 3rd column, sum it with the 2nd column
         if self.data.shape[1] > 2:
             ch2 = pd.to_numeric(self.data.iloc[:, 2], errors='coerce')
             counts = counts.fillna(0) + ch2.fillna(0)
-            
-        # 1. Determine time step (dt)
         original_len = len(counts)
         if pd.isna(self.meta.integration_time):
             dt = 0.1  # Fallback: Assume 100ms (0.1s) per bin
         else:
             dt = self.meta.integration_time / original_len
-            
-        # 2. Throw away the first 5 data points (artifacts)
         if original_len > 10:
             counts = counts.iloc[5:].reset_index(drop=True)
             power = power.iloc[5:].reset_index(drop=True)
-            
-        # 3. Build the new time array
         time = np.arange(len(counts)) * dt
-        
+        return time, counts, power
+
+    def plot(self, ax=None, label=None, configure_axes=True, show_power=True):
+        if ax is None: _, ax = plt.subplots()
+        time, counts, power = self.series()
+
         trace_label = label or "Counts"
         l1 = ax.plot(time, counts, label=trace_label, alpha=0.85)
 
@@ -174,19 +178,24 @@ class StabilityMeasurement(Measurement):
         return ax
 
 class SaturationMeasurement(Measurement):
-    def plot(self, ax=None):
-        if self.data is None: self.load()
-        if ax is None: _, ax = plt.subplots()
-
-        # Column 0 is Voltage/Power
+    def series(self):
+        """Return ``(voltage_or_power, counts)``."""
+        if self.data is None:
+            self.load()
         power = self.data.iloc[:, 0]
-        
-        # Fallback logic: Use column index 2 if it's a 3-column file, otherwise index 1
         counts = self.data.iloc[:, 2] if self.data.shape[1] > 2 else self.data.iloc[:, 1]
+        return power, counts
 
-        ax.plot(power, counts, 'bo', markersize=6)
-        ax.set_xlabel("Power")
-        ax.set_ylabel("Counts")
-        ax.set_title("Saturation")
-        ax.grid(True)
+    def plot(self, ax=None, label=None, configure_axes=True):
+        if ax is None: _, ax = plt.subplots()
+        power, counts = self.series()
+
+        trace_label = label or "Saturation"
+        ax.plot(power, counts, 'o', markersize=6, label=trace_label, alpha=0.85)
+        if configure_axes:
+            ax.set_xlabel("Power")
+            ax.set_ylabel("Counts")
+            ax.set_title("Saturation")
+            ax.grid(True)
+            ax.legend(loc='best')
         return ax

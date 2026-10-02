@@ -1,24 +1,86 @@
-# TCSPC Data Explorer & Report Generator
+# TCSPC analysis
 
-A Python toolkit for parsing, visualizing, and analyzing Time-Correlated Single Photon Counting (TCSPC) and spatial scan data. 
+Parse, plot, and report Time-Correlated Single Photon Counting lab CSVs.
 
-This project takes a folder of raw CSV measurements (Photoluminescence maps, Spectra, g(2), Lifetime, Stability, and Saturation), stitches the spatial data together, and correlates all measurements by their physical (X, Y) coordinates.
+## Install
 
-## Two Main Features
+```bash
+pip install -r requirements.txt
+```
 
-1. **Interactive Dashboard (`app.py`)** A local Plotly Dash web app. It generates a stitched PL map consisting of all taken PL maps. Click on any spatial coordinate to view the Spectrum, Lifetime, g(2), Stability, and Saturation data taken at that spot.
-   
-2. **Automated PDF Reports (`generate_report.py`)**
-   A script that scans your data folder, finds every unique emitter location, and generates a clean, multi-page PDF (`Emitter_Report.pdf`). Each page features a 2x3 grid summarizing all data found for a specific coordinate.
+Run from anywhere; the scripts add this repo to `sys.path`.
 
-## Project Structure
+## Commands
+
+All tools live in `scripts/`. No path → a file/folder dialog opens.
+
+**Plot files** (one PNG per CSV, no coordinate grouping):
+
+```bash
+python scripts/plot.py
+python scripts/plot.py a.csv b.csv
+python scripts/plot.py path/to/folder
+python scripts/plot.py --out DIR a.csv
+```
+
+PNGs go to `data_processed/plots/<timestamp>/`. Mixed types are fine.
+
+**Emitter report** (group by `(X, Y)`, one PDF page per spot):
+
+```bash
+python scripts/report.py
+python scripts/report.py /path/to/csvs
+python scripts/report.py /path/to/csvs --out report.pdf
+```
+
+PDF goes to `data_processed/<folder_name>.pdf`.
+
+**Batch fitting** (lifetime + g(2) → summary CSVs):
+
+```bash
+python scripts/fit.py /path/to/csvs
+python scripts/fit.py /path/to/csvs --out DIR
+```
+
+**Map explorer** (click an emitter on a stitched PL map):
+
+```bash
+python scripts/explore.py
+python scripts/explore.py /path/to/csvs
+python scripts/explore.py /path/to/csvs --port 8051
+```
+
+Opens http://127.0.0.1:8051. Does not write files.
+
+## Filename convention
+
+Type is the first `_`-separated token:
+
+| Type | Pattern |
+|---|---|
+| PL | `PL_X{x}_Y{y}_ND{nd}_Pow{power}_Filter{filter}_Size{size}_Mesh{mesh}` |
+| Lifetime | `Lifetime_X{x}_Y{y}_ND{nd}_Pow{power}_Filter{filter}_Int{int}_TAC{tac}_Gain{gain}_Bin{bin}` |
+| g2 | `g2_X{x}_Y{y}_ND{nd}_Pow{power}_Filter{filter}_Int{int}_TAC{tac}_Gain{gain}_Bin{bin}` |
+| Spectrum | `Spectrum_X{x}_Y{y}_ND{nd}_Pow{power}_Int{int}` |
+| Stability | `Stability_X{x}_Y{y}_ND{nd}_Pow{power}_Filter{filter}` optional `_Int{int}` |
+| Saturation | `Saturation_X{x}_Y{y}_Filter{filter}` |
+
+Unmatched names are listed and skipped. CSVs are tab-separated, no header.
+Histograms (lifetime/g2) are a single wide row.
+
+## Layout
+
 ```text
-tcspc_analysis/
-├── data_raw/               # Put your raw .csv files here for the autoscan
-├── data_processed/         # PDF reports will be saved here
-├── app.py                  # Run the interactive dashboard
-├── generate_report.py      # Run the PDF report generator
-└── src/
-    ├── parsers.py          # Regex logic for extracting metadata from filenames
-    ├── measurements.py     # Classes for loading/plotting each data type
-    └── fitting.py          # Math/fitting logic (biexponential decay, g2 dips)
+scripts/plot.py      # plot selected files → PNGs
+scripts/report.py    # folder → per-emitter PDF
+scripts/fit.py       # folder → lifetime/g2 summary CSVs
+scripts/explore.py   # click-to-plot map
+tcspc/               # library (parsers, measurements, plotting, …)
+tests/
+```
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -t . -v
+```
